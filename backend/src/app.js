@@ -27,16 +27,23 @@ const allowedOrigins = [
   'http://127.0.0.1:5173',
 ];
 if (process.env.FRONTEND_URL) {
-  allowedOrigins.push(process.env.FRONTEND_URL);
+  const cleanUrl = process.env.FRONTEND_URL.replace(/\/$/, '');
+  allowedOrigins.push(cleanUrl);
+  allowedOrigins.push(cleanUrl + '/');
 }
 
 app.use(cors({
   origin: function (origin, callback) {
     if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) !== -1 || origin.startsWith('http://localhost:')) {
+    
+    const isAllowed = allowedOrigins.includes(origin) || 
+                      origin.startsWith('http://localhost:') || 
+                      origin.endsWith('.vercel.app');
+                      
+    if (isAllowed) {
       return callback(null, true);
     }
-    return callback(new Error('The CORS policy for this site does not allow access from the specified Origin.'), false);
+    return callback(null, false);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
