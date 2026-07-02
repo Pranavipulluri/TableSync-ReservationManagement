@@ -6,10 +6,18 @@ The primary technical goal of this application is **guaranteed correctness under
 
 ---
 
+## 🏗️ Architecture Overview
+
+![TableSync Architecture](./docs/architecture.png)
+
+*Customer and admin requests flow through a JWT-authenticated Express API into MongoDB Atlas, where a partial unique index on the Reservations collection guarantees no double-bookings.*
+
+---
 ## 🚀 Live Demo & Seed Credentials
 
-- **Backend API Deployment:** *(e.g., Render/Railway URL)*
-- **Frontend Client Deployment:** *(e.g., Vercel URL)*
+- **GitHub Repository:** [github.com/Pranavipulluri/TableSync-ReservationManagement](https://github.com/Pranavipulluri/TableSync-ReservationManagement)
+- **Frontend Client URL:** [table-sync-reservation-management-1s1en5hoi.vercel.app](https://table-sync-reservation-management-1s1en5hoi.vercel.app)
+- **Backend API URL:** [tablesync-backend.onrender.com](https://tablesync-backend.onrender.com)
 
 ### Seed Accounts for Review:
 You can log in directly using these pre-seeded accounts:
@@ -129,6 +137,50 @@ To bypass timezone offsets between local browsers, Node servers, and UTC storage
 ### 3. Query Indexing
 To support quick filtering when admins view bookings by date, a plain index is defined on `{ date: 1 }`, guaranteeing fast query performance for large reservation datasets.
 
+### 4. Seating Efficiency & Table Assignment
+The system auto-assigns the smallest fitting table by default but allows customers to override and select any available table that meets their capacity requirement, giving flexibility while defaulting to efficient seating.
+
+### 5. Server-Side Validation Guarantees
+Even if a client attempts to bypass the frontend constraints (using DevTools, Postman, or cURL), the backend enforces all business rules independently. These validation guards apply uniformly across both the customer reservation-creation flow and the admin reservation-update flow, ensuring guest count and capacity constraints cannot be bypassed by either role:
+
+#### A. Guest Count Boundary Enforcements (1-8 guests)
+Requests with guest counts outside limits are caught before entering controller layers by Zod middleware in `validator.js`:
+```javascript
+const reservationSchema = z.object({
+  body: z.object({
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    timeSlot: z.enum([...]),
+    guests: z.number().int().positive().max(8, { 
+      message: 'Group size exceeds maximum table capacity (8 guests)' 
+    }),
+  })
+});
+```
+- **Response:** `422 Unprocessable Entity`
+- **Output:** `body.guests: Group size exceeds maximum table capacity (8 guests)`
+
+#### B. Manual Table-Override Capacity Guards
+If a customer attempts to manually select a table ID with insufficient capacity, the controller validates the table's capacity in `reservationController.js` during reservation creation:
+```javascript
+if (requestedTableId) {
+  selectedTable = availableTables.find(t => t._id.toString() === requestedTableId);
+  if (!selectedTable) {
+    const dbTable = await Table.findById(requestedTableId);
+    if (!dbTable) return res.status(404).json({ error: 'Table not found' });
+    
+    // Explicit capacity guard
+    if (dbTable.capacity < guests) {
+      return res.status(422).json({ 
+        success: false, 
+        error: `Table capacity (${dbTable.capacity}) is insufficient for ${guests} guests` 
+      });
+    }
+  }
+}
+```
+*Note: Happy-path table selections are pre-filtered via `Table.find({ capacity: { $gte: guests } })` in the availability checker utility.*
+- **Response:** `422 Unprocessable Entity`
+- **Output:** `Table capacity (capacity) is insufficient for X guests`
 ---
 
 ## 🔒 Security & Role-Based Access Control (RBAC)
@@ -157,6 +209,7 @@ The application implements JWT authentication with role gates.
 
 ## ⚠️ Known Limitations & Future Improvements
 
+- **Cold Start Delay:** The backend is hosted on Render's free tier, which may take 20–30 seconds to spin up and respond to the first request after a period of inactivity.
 - **No Overlapping Buffer support:** The current model uses discrete fixed time slots. With more time, a dynamic calendar system could calculate arbitrary durations with clean buffer offsets.
 - **Waitlists:** In case of fully booked slots, a waitlisting system could hold queue positions and auto-book tables if another customer cancels.
 - **Real-Time Updates:** Adding WebSockets would push instant table status updates to customers and administrators.
